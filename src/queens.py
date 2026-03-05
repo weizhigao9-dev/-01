@@ -1,7 +1,7 @@
 def is_safe(board, row, col):
     for i in range(row):
         # 检查列和对角线冲突
-        if board[i] == col or abs(board[i] - col) == abs(i - row):
+        if board[i] == col or abs(board[i] - col) == (i - row):
             return False
     return True
 
