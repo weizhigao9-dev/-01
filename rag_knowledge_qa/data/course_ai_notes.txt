@@ -1,0 +1,142 @@
+# RAG 知识库问答公开资料整理
+
+说明：本知识库文档按照“所有数据来自联网公开资料”的要求整理。内容不使用虚构课程资料，不编造个人信息，不把本地作业要求当作知识来源。每一节都标明公开来源链接，正文为对公开资料的中文整理、归纳和对比，用于 RAG 检索问答实验。
+
+## 资料来源清单
+
+1. LangChain RAG 教程：https://python.langchain.com/docs/tutorials/rag/
+2. LangChain 检索概念文档：https://python.langchain.com/docs/concepts/retrieval/
+3. Chroma 官方文档：https://docs.trychroma.com/docs/overview/introduction
+4. Chroma Collections 文档：https://docs.trychroma.com/docs/collections
+5. Chroma Embedding Functions 文档：https://docs.trychroma.com/docs/embeddings/embedding-functions
+6. DeepSeek API 文档：https://api-docs.deepseek.com/
+7. DeepSeek Chat Completions 文档：https://api-docs.deepseek.com/api/create-chat-completion
+8. Streamlit st.text_input 文档：https://docs.streamlit.io/develop/api-reference/widgets/st.text_input
+9. Streamlit st.sidebar 文档：https://docs.streamlit.io/develop/api-reference/layout/st.sidebar
+10. Lewis 等人 RAG 论文：https://arxiv.org/abs/2005.11401
+
+## RAG 的基本思想
+
+资料来源：LangChain RAG 教程、LangChain 检索概念文档、Lewis 等人 RAG 论文。
+
+RAG 是 Retrieval-Augmented Generation 的缩写，中文常译为“检索增强生成”。它的核心思路是：大模型在生成答案前，不只依赖模型参数中已经记住的知识，而是先从外部资料库中检索相关内容，再把检索到的内容作为上下文交给生成模型。这样做可以缓解两个常见问题。第一，大模型的训练知识有时间边界，不能保证知道最新资料。第二，模型通常不知道用户自己的私有文档、项目材料、企业手册或课程文件。RAG 通过外部检索把这些资料临时加入上下文，使模型能够基于资料回答问题。
+
+LangChain 的 RAG 教程把一个典型问答系统拆成几个步骤：先加载文本资料，再把资料拆分成较小片段，然后使用向量模型把片段转成 embedding，接着把 embedding 存进向量数据库，用户提问时从向量数据库中检索相似片段，最后把检索片段和问题一起放进提示词，让聊天模型生成答案。这个流程不是单一模型就能完成的，而是由文档加载器、文本切分器、向量存储、检索器、提示词模板和聊天模型组合成一个应用。
+
+Lewis 等人在 RAG 论文中提出，检索增强生成把参数化记忆和非参数化记忆结合起来。参数化记忆指模型参数里学到的语言和知识，非参数化记忆指外部可检索文档集合。对于知识密集型任务，模型只靠参数可能回答不准；加入检索文档后，生成过程可以利用更明确的证据。对课程项目来说，这个思想非常适合展示：同一个问题，普通 LLM 只能给通用回答，RAG 则可以把答案限定到知识库中出现过的资料。
+
+## LangChain 中的检索组件
+
+资料来源：LangChain 检索概念文档、LangChain RAG 教程。
+
+LangChain 把检索看作一种从非结构化数据中取回相关信息的过程。非结构化数据可以是网页、PDF、Markdown、TXT、Word 文档或者其他文本材料。为了让大模型使用这些资料，需要把资料加载成 Document，再把长文档拆成较小的 chunks。拆分的原因是大模型上下文窗口有限，向量检索也需要比较短而主题清晰的文本单元。如果一个片段太长，里面可能包含多个主题，检索结果会混杂；如果一个片段太短，答案所需上下文可能不完整。
+
+LangChain 的 RAG 教程通常会使用 TextLoader、WebBaseLoader 或其他 loader 读取资料，再使用 RecursiveCharacterTextSplitter 进行切分。RecursiveCharacterTextSplitter 会按照一组分隔符递归拆分文本，尽量保留段落和句子的完整性。常见参数包括 chunk_size 和 chunk_overlap。chunk_size 控制每个片段最大长度，chunk_overlap 控制相邻片段之间保留多少重叠内容。重叠的意义是防止重要信息刚好落在切分边界而丢失。
+
+检索器的作用是根据用户问题返回相关文档片段。向量检索是常见方案：先用 embedding 模型把问题转成向量，再在向量库中寻找语义距离近的文档向量。top_k 表示返回几个最相关片段。top_k 太小可能漏掉关键证据；top_k 太大可能给生成模型提供噪声。实际项目里可以从 top_k=3 或 top_k=4 开始，根据测试效果调整。
+
+## Chroma 向量数据库
+
+资料来源：Chroma 官方介绍、Chroma Collections 文档、Chroma Embedding Functions 文档。
+
+Chroma 是一个面向 AI 应用的开源向量数据库，常用于保存 embedding、文档文本和元数据。RAG 项目需要一个地方保存切分后的知识片段及其向量，Chroma 就能承担这个角色。向量数据库与普通关系数据库不同，它的核心能力不是按精确字段查询，而是根据语义相似度查找最接近的文本片段。例如用户问“RAG 为什么能减少幻觉”，系统可以检索到“先检索资料，再基于资料生成答案”的相关片段，即使原文没有完全一样的关键词。
+
+Chroma 使用 collection 组织数据。一个 collection 可以理解为一个知识库集合，里面包含多条记录。每条记录通常包括 id、document、embedding 和 metadata。document 保存原始文本片段，embedding 保存文本向量，metadata 保存来源、页码、章节、时间等辅助信息。metadata 对可追溯性很有帮助，因为生成答案后可以告诉用户答案来自哪一份资料、哪一页或哪一节。
+
+Embedding functions 是 Chroma 中的重要概念。它负责把文本转成向量。不同 embedding 模型适合不同语言和场景。中文资料可以选择支持中文效果较好的模型，例如 bge-small-zh 或其他中文 embedding 模型。英文资料可以使用通用英文 embedding 模型。选择 embedding 模型时要关注语言覆盖、向量维度、运行速度、是否需要联网下载、是否适合本地运行。课堂项目如果环境受限，可以先使用离线演示脚本展示流程，再在有网络的环境中运行完整 embedding 版本。
+
+## DeepSeek API 与 OpenAI 兼容调用
+
+资料来源：DeepSeek API 文档、DeepSeek Chat Completions 文档。
+
+DeepSeek 提供 API 文档，并支持通过接口创建聊天补全请求。对于 RAG 项目，生成模型可以使用 DeepSeek 的聊天模型。项目代码中通常需要配置 API Key、base_url、模型名称、temperature 等参数。base_url 用于指定接口地址，API Key 用于鉴权，model 用于选择具体模型，temperature 控制回答随机性。RAG 问答项目通常会把 temperature 设置得较低，例如 0 或 0.2，因为知识库问答更需要稳定和准确，而不是创造性表达。
+
+Chat Completions 接口的基本形式是：向模型传入 messages，messages 中包含 system、user 等角色消息。RAG 项目会把检索到的文档片段放入提示词，再把用户问题一起传给模型。提示词中应明确要求模型“只依据参考资料回答；如果资料不足，就说明知识库中没有找到依据”。这个约束对于文档外问题特别重要。如果用户问的是知识库没有的事实，系统不能为了显得有用而编造答案。
+
+使用云端模型时还要考虑数据安全。检索片段会被放进请求发送给模型服务，所以知识库中不应包含身份证号、密码、个人隐私、未授权公开的通信内容等敏感信息。课堂作业最好使用公开资料或自己允许公开的资料。若必须处理敏感文件，应先脱敏，再进入 RAG 流程。
+
+## Streamlit 交互界面
+
+资料来源：Streamlit st.text_input 文档、Streamlit st.sidebar 文档。
+
+Streamlit 是一个常用于快速搭建数据应用和 AI 演示页面的 Python 框架。RAG 项目可以用 Streamlit 做一个简易 Web 页面，让老师或同学直接输入问题，查看模型回答和检索片段。Streamlit 的 st.text_input 可以创建文本输入框，适合接收用户问题。st.sidebar 可以把参数控件放在页面侧边栏，例如 top_k、chunk_size、是否显示来源片段等。这样主页面用于展示问答，侧边栏用于控制实验参数，结构清楚。
+
+课堂展示时，Web 页面不需要特别复杂。一个实用界面通常包括四个区域：问题输入区、回答展示区、来源片段展示区、参数控制区。问题输入区让用户输入自然语言问题；回答展示区显示 RAG 生成答案；来源片段展示区列出系统检索到的证据；参数控制区允许调整 chunk_size、top_k 或是否显示来源。通过这个界面，观众能直观看到 RAG 与普通聊天模型的差别：RAG 不只是回答，还能展示它参考了哪些资料。
+
+如果时间有限，可以先完成命令行版本，再做 Streamlit 页面。命令行版本用于验证核心逻辑是否能跑通，Web 页面用于提高展示效果。正式提交时，README 中应写明如何安装依赖、如何设置 API Key、如何运行脚本、如何启动 Streamlit 页面。
+
+## 文本切分参数分析
+
+资料来源：LangChain RAG 教程、LangChain 检索概念文档。
+
+chunk_size 是 RAG 项目中非常重要的参数。chunk_size=200 时，片段较短，检索命中通常更精细，适合概念定义、短事实、名词解释等问题。但短片段也可能把上下文切断，例如一个问题需要前后两句话才能解释清楚，200 字可能不够。chunk_size=500 时，通常能保留一个相对完整的小节，既有足够上下文，又不会过于混杂，是很多课程项目可以尝试的默认值。chunk_size=1000 时，上下文更完整，适合流程解释、案例分析和长段落总结，但检索片段可能包含多个主题，导致相似度排序不够精确。
+
+chunk_overlap 用来缓解边界问题。如果两个相邻片段之间没有重叠，答案所需信息可能刚好被切开。设置 50 到 100 字重叠，可以让重要句子在相邻片段中同时出现，提高召回概率。重叠过大也有缺点，会增加向量库数据量，并让检索结果出现重复。因此参数选择需要结合文档类型和测试问题，而不是机械套用一个固定值。
+
+top_k 也会影响回答质量。top_k=1 时，模型只看到一个片段，答案可能缺证据。top_k=3 时，通常能兼顾信息量和噪声控制。top_k 太大时，提示词会变长，模型可能被无关片段干扰。一个合理实验是固定问题集，分别测试不同 chunk_size 和 top_k，观察答案是否完整、是否引用正确证据、是否出现无依据发挥。
+
+## 普通 LLM 与 RAG 的差异
+
+资料来源：LangChain RAG 教程、Lewis 等人 RAG 论文。
+
+普通 LLM 在回答通用知识问题时可能表现不错。例如问“RAG 是什么”，普通模型大概率能给出大致定义。但如果问题涉及某个指定资料库中的细节，普通 LLM 没有看到资料，就只能猜测或给出笼统回答。RAG 的优势是把检索到的资料放入上下文，让答案有更明确的证据来源。对于需要可追溯答案的场景，例如课程作业、企业知识库、产品手册问答、政策文件问答，RAG 比单纯聊天更可靠。
+
+RAG 也不是万能的。它可能检索不到相关片段，可能检索到错误片段，也可能检索正确但生成模型没有遵守提示词。RAG 项目的关键不是证明系统永远正确，而是展示系统如何基于证据回答、如何在资料不足时拒答、如何通过参数和提示词改进失败案例。因此测试集中必须包含文档外问题。只有当系统能说“知识库中没有找到依据”时，才说明它具备基本的边界意识。
+
+## 五个测试问题设计
+
+资料来源：本知识库的公开资料整理内容。
+
+测试集包含五个问题，其中三个问题可以从公开资料整理内容中找到答案，两个问题在知识库中没有答案。文档内问题包括：第一，RAG 的基本流程是什么；第二，LangChain RAG 流程中为什么要进行文本切分；第三，Chroma collection 通常保存哪些内容。文档外问题包括：第一，任课教师下周三的办公室具体地点在哪里；第二，某同学的真实学号是多少。文档外问题不应该由系统编造，因为公开来源中没有这些事实。
+
+这五个问题能覆盖三个能力：概念理解、工具理解和边界识别。概念理解对应 RAG 的流程；工具理解对应 LangChain 和 Chroma；边界识别对应两个文档外问题。对比普通 LLM 与 RAG 时，普通 LLM 可能对前两个问题给出通用答案，但很难说明本知识库中 Chroma 的结构来源；面对文档外问题，普通 LLM 可能建议查询通知或名单，而 RAG 应直接指出知识库中没有依据。
+
+## 失败案例分析
+
+资料来源：LangChain 检索概念文档、Chroma 文档、DeepSeek API 文档。
+
+失败案例一是检索不到。可能原因包括问题表达和资料表达差距太大、embedding 模型不适合中文、chunk_size 太小导致上下文断裂、资料清洗不充分导致标题和正文混在一起。改进方案包括增加同义词、加入 query rewrite、选择更适合中文的 embedding 模型、调整 chunk_size 和 overlap、为文档片段增加 metadata。比如用户问“外挂资料库怎么接到模型上”，而资料只写“检索增强生成”，检索器可能召回不稳定。可以把问题改写成“RAG 如何把外部知识库提供给模型”，再检索。
+
+失败案例二是检索到了但回答错误。可能原因包括提示词约束不够、检索片段太多导致噪声增加、模型 temperature 太高、不同来源之间存在冲突。改进方案包括降低 temperature，要求模型只依据资料回答，要求答案引用来源片段编号，并在回答后增加自检步骤：检查答案中的关键事实是否能在资料中找到。如果不能找到，就删除该事实或标注不确定。
+
+失败案例三是文档外问题被模型强行回答。这个问题在普通 LLM 中很常见，因为模型倾向于给用户一个看似有帮助的回复。RAG 项目要通过提示词和阈值控制减少这种情况。如果相似度低于阈值，系统应直接返回“知识库中没有找到依据”。在课堂项目中，可以专门演示一个文档外问题，说明系统不会编造教师办公室、学生学号或实时通知。
+
+## 提交材料说明
+
+资料来源：本项目文件结构与公开工具文档整理。
+
+本项目提交材料包括代码、数据、测试结果、报告和展示 PPT。代码目录 src 中包含 rag_pipeline.py、offline_demo.py 和 app.py。rag_pipeline.py 是完整 LangChain RAG 流水线；offline_demo.py 是没有 API Key 或依赖不完整时的离线演示；app.py 是 Streamlit 页面。data 目录保存联网公开资料整理后的知识库文档。outputs 目录保存五个问题的对比测试结果。docs 目录保存项目报告和展示 PPT。screenshots 目录保存仓库证明和代码结构截图。
+
+正式提交到 GitHub 时，应把整个 rag_knowledge_qa 文件夹上传，保证老师能看到完整项目。README 中应包含项目目标、运行方式、目录结构和仓库链接。requirements.txt 中应列出依赖包。测试结果文件应保留 CSV 和 Markdown 两种格式，CSV 方便放入报告，Markdown 方便 GitHub 在线阅读。
+
+## 公开资料如何进入知识库
+
+资料来源：LangChain RAG 教程、LangChain 检索概念文档。
+
+公开网页资料不能直接等同于高质量知识库。网页通常包含导航栏、页脚、广告、版本提示、代码块、标题层级和跳转链接。RAG 项目在使用公开资料时，需要先判断哪些内容与问题相关，再把它们整理成适合检索的文本。比如 LangChain RAG 教程主要用于解释应用流程，检索概念文档用于解释 retrieval、document、chunk 和 retriever，Chroma 文档用于解释 collection 和 embedding，DeepSeek 文档用于解释聊天补全接口，Streamlit 文档用于解释交互页面控件。不同来源承担不同作用，不能混在一起写成没有结构的长文。
+
+资料整理时还要保留来源链接。来源链接有两个用途：第一，报告中可以证明内容来自公开网页，而不是凭空生成；第二，当老师或同学质疑某个技术说法时，可以回到原始文档核对。RAG 项目强调可追溯性，知识库本身也应该可追溯。因此本文件开头列出来源清单，各章节也写明使用哪些来源。这样做比只在报告末尾放一堆链接更清楚。
+
+## metadata 的作用
+
+资料来源：Chroma Collections 文档、LangChain 检索概念文档。
+
+metadata 是 RAG 项目中容易被忽略但很有价值的部分。document 保存文本片段，embedding 保存向量，metadata 则保存这个片段的附加信息，例如来源 URL、章节标题、页码、文件名、抓取日期、资料类型和语言。没有 metadata 时，系统即使回答正确，也很难告诉用户答案来自哪里。有 metadata 时，可以在答案后展示“来源：LangChain RAG 教程”或“来源：Chroma Collections 文档”，这会增强可信度。
+
+metadata 还可以参与过滤检索。例如知识库同时包含 LangChain、Chroma 和 Streamlit 资料，用户只想问向量数据库，就可以过滤 source=Chroma 的片段。企业知识库中也常用 metadata 区分部门、年份、文档权限和版本。课堂项目不一定要实现复杂过滤，但报告中说明 metadata 的价值，可以体现对 RAG 系统设计的理解。
+
+## API 调用参数说明
+
+资料来源：DeepSeek API 文档、DeepSeek Chat Completions 文档。
+
+使用 DeepSeek 或其他 OpenAI 兼容接口时，代码通常包含模型名、base_url、api_key、temperature 和 messages。messages 是聊天模型的输入，由 system、user、assistant 等角色消息组成。RAG 项目会把检索到的上下文放入 user 消息或提示词模板中，再附上用户问题。temperature 越高，模型回答越随机，适合创意写作；temperature 越低，回答越稳定，适合知识库问答。因为本项目需要根据资料回答，所以更适合设置为 0 或较低值。
+
+API Key 不应该写死在代码中。更好的方式是通过环境变量读取，例如 DEEPSEEK_API_KEY。这样即使代码上传到公开 GitHub 仓库，也不会泄露密钥。README 中可以说明如何设置环境变量，但不能把真实 Key 写进去。这一点也属于项目安全性要求。
+
+## Streamlit 页面参数解释
+
+资料来源：Streamlit st.text_input 文档、Streamlit st.sidebar 文档。
+
+Streamlit 页面中，st.text_input 适合接收用户问题。用户输入问题后，程序可以把问题传给检索器和生成模型，再把答案显示在页面上。st.sidebar 适合放置参数控件，因为侧边栏不会挤占主回答区域。对于 RAG 演示，可以把 top_k、chunk_size、是否显示来源片段等选项放在 sidebar 中。这样老师可以在展示时看到参数变化如何影响检索结果。
+
+一个好的课堂演示页面应尽量简单。页面标题说明项目名称，输入框接收问题，按钮触发回答，回答区显示最终回复，来源区显示检索片段。不要把太多无关控件放进去，否则五分钟演示时反而难以讲清楚。RAG 项目的重点是“检索证据 + 生成回答”，界面设计应围绕这个重点服务。
